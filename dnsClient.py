@@ -1,5 +1,7 @@
 import argparse
 import random
+import socket
+import time
 
 global request_type
 
@@ -82,6 +84,44 @@ def createDnsQuery(args):
     print(dns_query)
 
     return bytes.fromhex(dns_query)
+
+def sendQuery(query, args):
+    global request_type
+
+    response=None
+
+    print(f'DnsClient sending request for [{args.name}]')
+    print(f'Server: [{args.server[1:]}]')
+    print(f'Request type: [{request_type}]')
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # Create UDP socket
+    sock.settimeout(args.t)
+
+    max_retries = args.r
+    retries = 0
+
+    while retries <= max_retries:
+        try:
+            start_time = time.time() # begin timer for the request
+            sock.sendto(query, (args.server[1:], args.p)) # send query
+            response, _ = sock.recvfrom(1024) # receive query
+            end_time = time.time() # end the timer 
+            total_time = end_time - start_time # total time needed to receive a response
+            print(f'Response received after {total_time} seconds ({retries} retries)')
+            response = response.hex()
+            break
+        except socket.timeout:
+            retries += 1 
+            if (retries > max_retries) :
+                print(f"ERROR \t Maximum number of retries [{max_retries}] exceeded")
+                break
+            print(f"ERROR \t Timeout: Retransmitting query...")
+            continue
+        except Exception as e:
+            print(f"ERROR \t Unexpected response: {e}")
+            break
+            
+    return response     
 
 if __name__ == "__main__":
     args = parseInput()
