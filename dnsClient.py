@@ -121,7 +121,7 @@ def sendQuery(query, args):
             print(f"ERROR \t Unexpected response: {e}")
             break
             
-    parseResponse(response)     
+    if response != None: parseResponse(response)     
     return response     
 
 # Function that decodes a label (not a pointer)
@@ -209,6 +209,25 @@ def parseResponse(response):
     RA = second_row[8:9] #sure recursive queries 
     Z = second_row[9:12]
     RCODE = second_row[12:16] #important yes 
+    rcode = int(RCODE, 2) #get int of RCODE
+
+    if rcode == 1:
+        print('ERROR \t Format error: the name server was unable to interpret the query')
+        exit()
+    elif rcode == 2:
+        print('ERROR \t Server failure: the name server was unable to process this query due to a problem with the name server')
+        exit()
+    elif rcode == 3 and AA == 1:
+        print('NOTFOUND \t Name error: this code signifies that the domain name referenced in the query does not exist')
+        exit()
+    elif rcode == 4:
+        print('ERROR \t Not implemented: the name server does not support the requested kind of query')
+        exit()
+    elif rcode == 5:
+        print('ERROR \t Refused: the name server refuses to perform the requested operation for policy reasons')
+        exit()
+    elif rcode != 0:
+        exit()
 
     QDCOUNT = header[8:12]
     ANCOUNT = header[12:16]
@@ -279,8 +298,6 @@ def parseResponse(response):
 
     '''
     TODO
-
-    -  Output correct error messages for RCODE (p2-3 of dnsprimer)    
 
     -  rdata for type MX has a different format so need to look into this
 
