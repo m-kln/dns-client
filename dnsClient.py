@@ -240,7 +240,7 @@ def parseResponse(response):
     question = response[24:24+(len(question_temp))] 
 
     # ============================================= Retrieving the answer =============================================
-    if (int(ANCOUNT,16) != 0): #technically this if is not needed 
+    if (int(ANCOUNT,16) + int(ARCOUNT, 16) > 0): #technically this if is not needed 
         print(f'***Answer Section ({int(ANCOUNT,16)} records)***')
 
         record_offset = 0 
@@ -248,46 +248,48 @@ def parseResponse(response):
         # This is the WHOLE answer block (skipping header and question)
         answer = response[24+(len(question_temp)):]
 
-        while records_treated < int(ANCOUNT,16): 
+        while records_treated < (int(ANCOUNT, 16) + int(NSCOUNT, 16) + int(ARCOUNT, 16)): 
             # Getting the data from beginning of the Answer section until the end 
             rdata = answer[record_offset:] #for NAME section 
             _, end = decodeName(rdata, response)
 
             response_type = answer[record_offset+end:record_offset+end+4]
-            TTL = answer[record_offset+ end +8:record_offset+ end+16]
+            TTL = answer[record_offset+end+8:record_offset+ end+16]
             ttl = int(TTL, 16)
-            RDLENGTH = answer[record_offset+ end +16:record_offset + end+20]
+            RDLENGTH = answer[record_offset+end+16:record_offset+end+20]
             rdlength_int=int(RDLENGTH, 16)
-            rdata = answer[record_offset+ end +20:record_offset + end+ 20+rdlength_int*2]
+            rdata = answer[record_offset+end+20:record_offset+end+20+rdlength_int*2]
 
             #This is the block that represents the entire answer data for one answer record 
             answer_record = answer[record_offset: record_offset + end + 20+rdlength_int*2]
 
-            if response_type == "0001":
-                # ---- Type A query ----
-                # Converting the IP 
-                # Assume IP = a.b.c.d
-                ip_a = str(int(rdata[0:2],16))
-                ip_b = str(int(rdata[2:4],16))
-                ip_c = str(int(rdata[4:6],16))
-                ip_d = str(int(rdata[6:8],16))
-                ip_full = ip_a+"."+ip_b+"."+ip_c+"."+ip_d
-
-                print(f"IP \t {ip_full} \t {ttl} \t {auth}")
-            elif response_type == "0002":
-                # Type NS query
-                alias, _ = decodeName(rdata, response)
-                print(f"NS \t {alias} \t {ttl} \t {auth}")
-            elif response_type == "0005":
-                # Type CNAME
-                alias, _ = decodeName(rdata, response)
-                print(f"CNAME \t {alias} \t {ttl} \t {auth}")
-            elif response_type == "000f":
-                # Type MX query
-                alias, _ = decodeName(rdata, response)
-                print(f"IP \t {alias} \t {ttl} \t {auth}")
-            else:
-                print("error")
+            # Only deal with the content if it's Answers or Additional Records (Authoritative Records are skipped)
+            if records_treated < int(ANCOUNT, 16) or records_treated >= (int(ANCOUNT, 16) + int(NSCOUNT, 16)) : 
+                if response_type == "0001":
+                    # ---- Type A query ----
+                    # Converting the IP 
+                    # Assume IP = a.b.c.d
+                    ip_a = str(int(rdata[0:2],16))
+                    ip_b = str(int(rdata[2:4],16))
+                    ip_c = str(int(rdata[4:6],16))
+                    ip_d = str(int(rdata[6:8],16))
+                    ip_full = ip_a+"."+ip_b+"."+ip_c+"."+ip_d
+                    print(f"IP \t {ip_full} \t {ttl} \t {auth}")
+                elif response_type == "0002":
+                    # Type NS query
+                    alias, _ = decodeName(rdata, response)
+                    print(f"NS \t {alias} \t {ttl} \t {auth}")
+                elif response_type == "0005":
+                    # Type CNAME
+                    alias, _ = decodeName(rdata, response)
+                    print(f"CNAME \t {alias} \t {ttl} \t {auth}")
+                elif response_type == "000f":
+                    # Type MX query
+                    preference = str(int(rdata[0:4], 16))
+                    alias, _ = decodeName(rdata[4:], response)
+                    print(f"MX \t {alias} \t {preference} \t {ttl} \t {auth}")
+                else:
+                    print("error") #need to change this prolly
             
             # Updating offset 
             record_offset = record_offset + len(answer_record)
@@ -299,10 +301,10 @@ def parseResponse(response):
     '''
     TODO
 
-    -  rdata for type MX has a different format so need to look into this
-
     -  If there are records in the "Additional" section, then we must also print them (idk what we can use to test this, but it's part of the doc) 
-
+    -  `python dnsClient.py -t 10 -r 2 -mx @132.206.85.18 mcgill.ca` <=== This could be used to test this allegedly 
+    -  ^^^^ This should be supported now, need to test it (i dont have the mcgill vpn) 
+    
     -  Some more error handling maybe? Could be more robust 
 
     -  finalize + cleanup?? im not sure if we have anything else to do 
