@@ -11,7 +11,7 @@ import time
 global request_type, header_temp, question_temp
 labels = []
 
-def parseInput():
+def parse_input():
     '''
     Parsing input from the cmd 
     '''
@@ -29,7 +29,7 @@ def parseInput():
 
     return parser.parse_args()
 
-def createDnsQuery(args): 
+def create_dns_query(args): 
     '''
     Creating a DNS query based on the arguments provided in the cmd, and default values 
     '''
@@ -98,7 +98,7 @@ def createDnsQuery(args):
 
     return bytes.fromhex(dns_query)
 
-def sendQuery(query, args):
+def send_query(query, args):
     '''
     Sending the created query to a DNS server using the inputted IP and Domain Name in the cmd 
     '''
@@ -142,11 +142,10 @@ def sendQuery(query, args):
         except Exception as e:
             print(f"ERROR \t Unexpected response: {e}")
             break
-    
-    if response != None: parseResponse(response)     
+
     return response     
 
-def decode_label(rdata, index): 
+def decode_label(data, index): 
     '''
     Decodes a single label (not a pointer) and returns the string equivalent 
     
@@ -154,7 +153,7 @@ def decode_label(rdata, index):
     '''
 
     # Decimal of hex length (ex: 03)
-    label_length = int(rdata[index:index + 2], 16) 
+    label_length = int(data[index:index + 2], 16) 
     # Start decoding the letters (ex: now index is at the first 7)
     index += 2  
     label = "" 
@@ -162,7 +161,7 @@ def decode_label(rdata, index):
     # Converting the ascii label into a real string 
     for _ in range(label_length):
         # Decode the character
-        char = chr(int(rdata[index:index + 2], 16)) 
+        char = chr(int(data[index:index + 2], 16)) 
         # Append the character to the string 
         label += char 
         index += 2  
@@ -197,25 +196,26 @@ def decode_pointer(response, offset):
     return temp_label
 
 # Main logic for decoding the name
-def decodeName(rdata, response):
+def decode_name(data, response):
     '''
-    [todo: docstring]
+    Decodes a domain name from the DNS response, handling both uncompressed labels and compressed pointers. 
+    Returns the full domain name along with the updated index position.
     '''
     i = 0
     label_array = []
 
     while (True): 
         # Compression identified, deal with pointers (c0 found)
-        if rdata[i:i+2] == "c0": 
+        if data[i:i+2] == "c0": 
             # Find hex offset of pointer (byte after 'c0') and convert it to decimal 
-            offset = int(rdata[i+2:i+4], 16) 
+            offset = int(data[i+2:i+4], 16) 
             label_array += decode_pointer(response, offset)
             # Next index after the entire pointer (ex: c010)
             i += 4 
             break
         # Uncompressed, decode label as is (not c0 or 00)
-        elif rdata[i:i+2] != "00": 
-            label, i = decode_label(rdata, i)
+        elif data[i:i+2] != "00": 
+            label, i = decode_label(data, i)
             label_array.append(label)
         else: 
             i+= 2
@@ -224,17 +224,21 @@ def decodeName(rdata, response):
     # Connect the labels with periods (label1.label2.etc)
     return ".".join(label_array), i 
 
-def parseResponse(response): 
+def parse_response(response): 
     '''
-    [todo: docstring]
+    Parses the DNS response received from a server and displays the required information. 
     '''
     global question_temp, header_temp
 
     # -- Retrieving the Header --
     header = response[0:24]
-    ID = header[0:4]
+    response_id = header[0:4]
+    query_id = header_temp[0:4]
 
-    # TODO: need to check response id matches with query (error handling)
+    # Check response ID matches with query ID
+    if (query_id != response_id):
+        print('ERROR \t Unexpected response: Response ID does not match Query ID')
+        return
 
     second_row = header[4:8]
     second_row = bin(int(second_row, 16)).replace('0b','')
@@ -249,7 +253,9 @@ def parseResponse(response):
     
     # TC = second_row[6:7] 
     # RD = second_row[7:8]
-    # RA = second_row[8:9]
+    RA = second_row[8:9]
+    if RA == "0":
+        print('ERROR \t The server does not support recursive queries.')
     # Z = second_row[9:12]
     RCODE = int(second_row[12:16], 2) 
 
@@ -268,8 +274,8 @@ def parseResponse(response):
     elif RCODE == 5:
         print('ERROR \t Refused: the name server refuses to perform the requested operation for policy reasons')
         exit()
-    elif RCODE != 0:
-        exit()
+    elif RCODE < 0 or RCODE > 5:
+        print('ERROR \t Unexpected response: RCODE value is not within the range [0,5]')
 
     # QDCOUNT = header[8:12]
     ANCOUNT = header[12:16]
@@ -278,7 +284,7 @@ def parseResponse(response):
 
     # -- Retrieving the question --
     # question = response[24:24+(len(question_temp))] 
-
+  
     # -- Retrieving the answer --
     if (int(ANCOUNT,16) + int(ARCOUNT, 16) > 0):
         print(f'***Answer Section ({int(ANCOUNT,16)} records)***')
@@ -293,23 +299,25 @@ def parseResponse(response):
             # Getting the data excluding the records already treated
             rdata = answer[record_offset:]
             # Decoding, and ignoring, the 'NAME' section of the answer 
-            _, end = decodeName(rdata, response)
+            _, end = decode_name(rdata, response)
 
             # Getting other DNS Answers attributes 
-            response_type = answer[record_offset+end:record_offset+end+4]
-            TTL = int(answer[record_offset+end+8:record_offset+ end+16], 16) 
-            RDLENGTH = int(answer[record_offset+end+16:record_offset+end+20], 16) 
-            rdata = answer[record_offset+end+20:record_offset+end+20+RDLENGTH*2]
+            record_type = answer[record_offset+end:record_offset+end+4]
+            record_class = answer[record_offset+end+4:record_offset+end+8]
+            if record_class != "0001": print('ERROR \t Unexpected response: The value of the CLASS field in the DNS Answer is NOT 0x0001.')
+            ttl = int(answer[record_offset+end+8:record_offset+ end+16], 16) 
+            rdlength = int(answer[record_offset+end+16:record_offset+end+20], 16) 
+            rdata = answer[record_offset+end+20:record_offset+end+20+rdlength*2]
 
             #This is the data block that represents the entire DNS Answer for one single record (used for offset) 
-            answer_record = answer[record_offset: record_offset + end + 20+RDLENGTH*2]
+            answer_record = answer[record_offset: record_offset + end + 20+rdlength*2]
 
             # Only deal with the content if it's Answers or Additional Records (Authoritative Records are skipped)
             if records_treated < int(ANCOUNT, 16) or records_treated >= (int(ANCOUNT, 16) + int(NSCOUNT, 16)) : 
                 # All normal Answer records have been treated, starting to treat Additional Records 
                 if records_treated == int(ANCOUNT, 16): 
                     print(f"***Additional Section ({int(ARCOUNT, 16)} records)***")
-                if response_type == "0001":
+                if record_type == "0001":
                     # Type A query 
                     # Obtaining the IP in format a.b.c.d
                     ip_a = str(int(rdata[0:2],16))
@@ -317,29 +325,32 @@ def parseResponse(response):
                     ip_c = str(int(rdata[4:6],16))
                     ip_d = str(int(rdata[6:8],16))
                     ip_full = ip_a+"."+ip_b+"."+ip_c+"."+ip_d
-                    print(f"IP \t {ip_full} \t {TTL} \t {auth}")
-                elif response_type == "0002":
+                    print(f"IP \t {ip_full} \t {ttl} \t {auth}")
+                elif record_type == "0002":
                     # Type NS query
-                    alias, _ = decodeName(rdata, response)
-                    print(f"NS \t {alias} \t {TTL} \t {auth}")
-                elif response_type == "0005":
+                    alias, _ = decode_name(rdata, response)
+                    print(f"NS \t {alias} \t {ttl} \t {auth}")
+                elif record_type == "0005":
                     # Type CNAME
-                    alias, _ = decodeName(rdata, response)
-                    print(f"CNAME \t {alias} \t {TTL} \t {auth}")
-                elif response_type == "000f":
+                    alias, _ = decode_name(rdata, response)
+                    print(f"CNAME \t {alias} \t {ttl} \t {auth}")
+                elif record_type == "000f":
                     # Type MX query
                     preference = str(int(rdata[0:4], 16))
-                    alias, _ = decodeName(rdata[4:], response)
-                    print(f"MX \t {alias} \t {preference} \t {TTL} \t {auth}")
+                    alias, _ = decode_name(rdata[4:], response)
+                    print(f"MX \t {alias} \t {preference} \t {ttl} \t {auth}")
                 else:
-                    # TODO: replace this 
-                    print("error") 
+                    print('ERROR \t Unexpected response: Invalid record type')
             
             # Updating offset 
             record_offset = record_offset + len(answer_record)
             records_treated += 1 
+    else:
+        print("NOTFOUND")
+        exit()
 
 if __name__ == "__main__":
-    args = parseInput()
-    dns_query = createDnsQuery(args)
-    sendQuery(dns_query, args)
+    args = parse_input()
+    dns_query = create_dns_query(args)
+    response = send_query(dns_query, args)
+    if response != None: parse_response(response)     
